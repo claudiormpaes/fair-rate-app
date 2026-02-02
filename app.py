@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# CSS MASTER V26 - MOBILE FIX (STACK COLUMNS)
+# CSS MASTER V27 - FORÇAR EMPILHAMENTO NO MOBILE
 # ==============================================================================
 st.markdown("""
     <style>
@@ -27,7 +27,7 @@ st.markdown("""
         margin-bottom: 80px;
     }
     
-    /* --- MENUS E CONTROLES --- */
+    /* --- MENUS --- */
     [data-testid="stSidebarCollapsedControl"] {
         display: flex !important;
         visibility: visible !important;
@@ -45,17 +45,9 @@ st.markdown("""
         justify-content: center;
         transition: all 0.3s ease;
     }
-    [data-testid="stSidebarCollapsedControl"]:hover {
-        background-color: #B89B5E !important;
-        color: #0B1F3A !important;
-        transform: scale(1.1);
-        cursor: pointer;
-    }
     [data-testid="stSidebarCollapsedControl"] svg {
-        fill: currentColor !important;
-        stroke: currentColor !important;
+        fill: #B89B5E !important;
     }
-    
     [data-testid="stToolbar"] {
         visibility: visible !important;
         right: 20px; top: 10px;
@@ -86,9 +78,10 @@ st.markdown("""
         background: linear-gradient(180deg, #112240 0%, #0F1D36 100%);
         border: 1px solid #2C3E50;
         border-radius: 10px;
-        padding: 15px; /* Reduzi um pouco o padding padrão */
+        padding: 15px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-        height: 100%; /* Garante altura igual */
+        height: 100%;
+        min-height: 120px; /* Altura mínima para ficar bonito */
     }
     div[data-testid="stMetricLabel"] { 
         color: #94A3B8 !important; 
@@ -96,13 +89,13 @@ st.markdown("""
         font-weight: 600 !important;
         text-transform: uppercase; 
         white-space: normal !important; /* Permite quebrar linha no título */
-        min-height: 20px;
+        overflow-wrap: break-word;
     }
     div[data-testid="stMetricValue"] { 
         color: #F5F1E8 !important; 
         font-family: 'Montserrat', sans-serif;
         font-weight: 700;
-        font-size: 26px !important; 
+        font-size: 28px !important; 
     }
     div[data-testid="stMetricDelta"] {
         font-size: 12px !important;
@@ -124,11 +117,6 @@ st.markdown("""
         transition: all 0.2s ease;
         width: 100%;
     }
-    .stButton>button:hover { 
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(184, 155, 94, 0.5);
-        color: #000 !important;
-    }
     
     /* Inputs */
     div[data-baseweb="select"] > div, input {
@@ -138,16 +126,7 @@ st.markdown("""
         border-radius: 6px;
         font-size: 15px;
     }
-    div[data-baseweb="popover"], ul[role="listbox"] {
-        background-color: #0B1829 !important;
-        border: 1px solid #B89B5E !important;
-    }
-    li[role="option"] { color: #E6E2D8 !important; }
-    li[role="option"]:hover, li[role="option"][aria-selected="true"] {
-        background-color: #B89B5E !important;
-        color: #050E1A !important;
-    }
-
+    
     div[data-testid="column"] button { 
         background-color: #1E293B !important;
         color: #B89B5E !important;
@@ -155,10 +134,6 @@ st.markdown("""
         font-weight: 600;
         font-size: 13px;
         padding: 5px;
-    }
-    div[data-testid="column"] button:hover {
-        border-color: #B89B5E !important;
-        color: #F5F1E8 !important;
     }
 
     .footer {
@@ -171,36 +146,34 @@ st.markdown("""
     }
     .footer b { color: #B89B5E; }
 
-    /* --- OTIMIZAÇÃO CRÍTICA PARA CELULAR --- */
+    /* ============================================================
+       MOBILE EXTREME FIX - O QUEBRA-GALHO DEFINITIVO
+       ============================================================ */
     @media (max-width: 640px) {
-        h1 { font-size: 1.5rem !important; }
+        /* 1. Título menor */
+        h1 { font-size: 1.6rem !important; }
         
-        /* Ajuste do botão do menu */
-        [data-testid="stSidebarCollapsedControl"] {
-            width: 45px !important; height: 45px !important;
+        /* 2. FORÇAR COLUNAS A FICAREM UMA EMBAIXO DA OUTRA 
+           Isso pega os Cards e coloca verticalmente */
+        div[data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 auto !important;
+            min-width: 100% !important;
+            margin-bottom: 15px !important; /* Espaço entre os cards empilhados */
         }
-
-        /* AQUI ESTÁ A SOLUÇÃO:
-           Diminuímos a fonte apenas no celular para caber na caixa
-           e reduzimos o padding (margem interna) para ganhar espaço
-        */
-        div[data-testid="stMetric"] {
-            padding: 10px !important;
-        }
+        
+        /* 3. Ajuste fino nos Cards */
         div[data-testid="stMetricValue"] { 
-            font-size: 20px !important; /* Fonte menor para não cortar */
-            word-break: break-all; /* Tenta quebrar se for gigante */
+            font-size: 32px !important; /* Agora posso aumentar a fonte de novo! */
         }
         div[data-testid="stMetricLabel"] {
-            font-size: 11px !important;
-            line-height: 1.2;
+            font-size: 14px !important;
         }
         
-        /* Ajuste de margens do container principal */
+        /* 4. Padding lateral para não colar na borda do celular */
         .block-container {
-            padding-top: 3rem !important;
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
         }
     }
     </style>
@@ -389,6 +362,7 @@ if not df_curva.empty:
         st.markdown("### 📍 MAPA DO MERCADO")
         st.caption("Posição da sua oferta em relação às curvas de juros da ANBIMA.")
         
+        # PREPARAÇÃO DADOS GRÁFICO
         chart_data = df_curva[df_curva['dias_corridos'] % 2 == 0].copy().dropna()
         chart_data['Anos'] = chart_data['dias_corridos'] / 252
         
@@ -404,12 +378,13 @@ if not df_curva.empty:
         domain = ['Curva Prefixada', 'Curva IPCA+ (Real)', 'Inflação Implícita']
         range_ = ['#3B82F6', '#F59E0B', '#64748B'] 
         
+        # GRÁFICO (COM LEGENDA EMBAIXO PARA MOBILE)
         lines = alt.Chart(base_melt).mark_line(strokeWidth=2.5).encode(
             x=alt.X('Anos', axis=alt.Axis(grid=False, labelColor='#CBD5E1', titleColor='#B89B5E')),
             y=alt.Y('Taxa', axis=alt.Axis(grid=True, gridColor='#1E293B', labelColor='#CBD5E1', titleColor='#B89B5E')),
             color=alt.Color('Curva', scale=alt.Scale(domain=domain, range=range_), 
                             legend=alt.Legend(
-                                orient='bottom',
+                                orient='bottom', # <--- OTIMIZAÇÃO MOBILE: Legenda embaixo
                                 title=None, 
                                 labelColor='#E2E8F0',
                                 direction='horizontal'
