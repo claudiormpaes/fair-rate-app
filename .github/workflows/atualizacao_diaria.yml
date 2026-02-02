@@ -1,0 +1,35 @@
+name: Robô ETL Anbima
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v3
+
+      - name: Instalar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar bibliotecas
+        run: |
+          pip install pandas requests lxml openpyxl numpy
+
+      - name: RODAR O ETL
+        run: python etl_anbima.py
+
+      - name: Salvar novo Banco de Dados
+        run: |
+          git config --global user.name 'Robo Claudio Paes'
+          git config --global user.email 'robo@claudiopaes.com.br'
+          git add meu_app.db
+          git commit -m "Atualização automática dos dados" || echo "Sem mudanças"
+          git push
