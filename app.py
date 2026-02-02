@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# CSS MASTER V25 - MOBILE FIRST & UI PREMIUM
+# CSS MASTER V26 - MOBILE FIX (STACK COLUMNS)
 # ==============================================================================
 st.markdown("""
     <style>
@@ -28,7 +28,6 @@ st.markdown("""
     }
     
     /* --- MENUS E CONTROLES --- */
-    /* Botão de Abrir Sidebar (Fixo Esquerda) */
     [data-testid="stSidebarCollapsedControl"] {
         display: flex !important;
         visibility: visible !important;
@@ -57,14 +56,11 @@ st.markdown("""
         stroke: currentColor !important;
     }
     
-    /* Menu Superior Direito (3 Pontos) */
     [data-testid="stToolbar"] {
         visibility: visible !important;
         right: 20px; top: 10px;
     }
     [data-testid="stToolbar"] button { color: #B89B5E !important; }
-    
-    /* Esconde Deploy/Decoração */
     .stAppDeployButton, [data-testid="stDecoration"] { display: none; }
     
     /* --- TIPOGRAFIA --- */
@@ -90,27 +86,30 @@ st.markdown("""
         background: linear-gradient(180deg, #112240 0%, #0F1D36 100%);
         border: 1px solid #2C3E50;
         border-radius: 10px;
-        padding: 18px;
+        padding: 15px; /* Reduzi um pouco o padding padrão */
         box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        height: 100%; /* Garante altura igual */
     }
     div[data-testid="stMetricLabel"] { 
         color: #94A3B8 !important; 
-        font-size: 14px !important; 
+        font-size: 13px !important; 
         font-weight: 600 !important;
         text-transform: uppercase; 
+        white-space: normal !important; /* Permite quebrar linha no título */
+        min-height: 20px;
     }
     div[data-testid="stMetricValue"] { 
         color: #F5F1E8 !important; 
         font-family: 'Montserrat', sans-serif;
         font-weight: 700;
-        font-size: 30px !important; 
+        font-size: 26px !important; 
     }
     div[data-testid="stMetricDelta"] {
-        font-size: 14px !important;
+        font-size: 12px !important;
         font-weight: 600;
     }
     
-    /* --- BOTÃO DE AÇÃO --- */
+    /* --- BOTÕES --- */
     .stButton>button {
         background: linear-gradient(90deg, #B89B5E 0%, #D4B475 100%);
         color: #050E1A !important;
@@ -131,7 +130,7 @@ st.markdown("""
         color: #000 !important;
     }
     
-    /* --- INPUTS --- */
+    /* Inputs */
     div[data-baseweb="select"] > div, input {
         background-color: #112240 !important;
         border: 1px solid #334155 !important;
@@ -149,7 +148,6 @@ st.markdown("""
         color: #050E1A !important;
     }
 
-    /* --- BOTÕES PEQUENOS --- */
     div[data-testid="column"] button { 
         background-color: #1E293B !important;
         color: #B89B5E !important;
@@ -163,7 +161,6 @@ st.markdown("""
         color: #F5F1E8 !important;
     }
 
-    /* --- RODAPÉ --- */
     .footer {
         position: fixed; left: 0; bottom: 0; width: 100%;
         background-color: #050E1A; 
@@ -171,31 +168,39 @@ st.markdown("""
         color: #94A3B8;
         text-align: center; padding: 15px; 
         font-size: 12px; z-index: 9999;
-        box-shadow: 0 -4px 10px rgba(0,0,0,0.3);
     }
     .footer b { color: #B89B5E; }
 
-    /* --- MEDIA QUERIES (OTIMIZAÇÃO MOBILE) --- */
+    /* --- OTIMIZAÇÃO CRÍTICA PARA CELULAR --- */
     @media (max-width: 640px) {
-        /* Título menor */
-        h1 { font-size: 1.6rem !important; }
+        h1 { font-size: 1.5rem !important; }
         
-        /* Botão Sidebar um pouco maior para toque */
+        /* Ajuste do botão do menu */
         [data-testid="stSidebarCollapsedControl"] {
-            width: 48px !important;
-            height: 48px !important;
+            width: 45px !important; height: 45px !important;
         }
 
-        /* Ajuste do tamanho da fonte dos Cards para não quebrar linha */
+        /* AQUI ESTÁ A SOLUÇÃO:
+           Diminuímos a fonte apenas no celular para caber na caixa
+           e reduzimos o padding (margem interna) para ganhar espaço
+        */
+        div[data-testid="stMetric"] {
+            padding: 10px !important;
+        }
         div[data-testid="stMetricValue"] { 
-            font-size: 24px !important; 
+            font-size: 20px !important; /* Fonte menor para não cortar */
+            word-break: break-all; /* Tenta quebrar se for gigante */
         }
-
-        /* Menos margem no topo para aproveitar espaço */
+        div[data-testid="stMetricLabel"] {
+            font-size: 11px !important;
+            line-height: 1.2;
+        }
+        
+        /* Ajuste de margens do container principal */
         .block-container {
-            padding-top: 2rem !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
+            padding-top: 3rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
         }
     }
     </style>
@@ -248,17 +253,15 @@ with st.sidebar:
     st.caption("PARAMETROS DA PROPOSTA")
     tipo_oferta = st.selectbox("Indexador", ["Prefixado", "IPCA + Spread", "% do CDI", "CDI + Spread"])
     
-    # SELETOR DE UNIDADE
     unidade_prazo = st.selectbox("Unidade de Prazo", ["Meses", "Anos", "Dias Úteis"])
     
-    # Lógica de Botões Dinâmicos
     if unidade_prazo == "Anos":
         b_labels = [1, 2, 5, 10]
         st.write("Prazo (Anos)")
     elif unidade_prazo == "Dias Úteis":
         b_labels = [252, 504, 1260, 2520] 
         st.write("Prazo (Dias Úteis)")
-    else: # Meses
+    else: 
         b_labels = [12, 24, 60, 120]
         st.write("Prazo (Meses)")
     
@@ -280,14 +283,12 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # 3.3 BOX DE CENÁRIO
     df_curva = carregar_dados_por_data(data_escolhida)
     cdi_projetado = 0.0
     implicita_projetada = 0.0
     dias_target = 0
     
     if not df_curva.empty:
-        # Conversão para Dias Úteis
         if unidade_prazo == "Meses":
             dias_target = int(prazo_input * 21)
         elif unidade_prazo == "Anos":
@@ -388,7 +389,6 @@ if not df_curva.empty:
         st.markdown("### 📍 MAPA DO MERCADO")
         st.caption("Posição da sua oferta em relação às curvas de juros da ANBIMA.")
         
-        # PREPARAÇÃO DADOS GRÁFICO
         chart_data = df_curva[df_curva['dias_corridos'] % 2 == 0].copy().dropna()
         chart_data['Anos'] = chart_data['dias_corridos'] / 252
         
@@ -404,13 +404,12 @@ if not df_curva.empty:
         domain = ['Curva Prefixada', 'Curva IPCA+ (Real)', 'Inflação Implícita']
         range_ = ['#3B82F6', '#F59E0B', '#64748B'] 
         
-        # GRÁFICO (COM LEGENDA EMBAIXO PARA MOBILE)
         lines = alt.Chart(base_melt).mark_line(strokeWidth=2.5).encode(
             x=alt.X('Anos', axis=alt.Axis(grid=False, labelColor='#CBD5E1', titleColor='#B89B5E')),
             y=alt.Y('Taxa', axis=alt.Axis(grid=True, gridColor='#1E293B', labelColor='#CBD5E1', titleColor='#B89B5E')),
             color=alt.Color('Curva', scale=alt.Scale(domain=domain, range=range_), 
                             legend=alt.Legend(
-                                orient='bottom', # <--- OTIMIZAÇÃO MOBILE: Legenda embaixo
+                                orient='bottom',
                                 title=None, 
                                 labelColor='#E2E8F0',
                                 direction='horizontal'
