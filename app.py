@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# CSS MASTER V27 - FORÇAR EMPILHAMENTO NO MOBILE
+# CSS MASTER V28 - SMART STACKING (RESOLVE O EMPILHAMENTO)
 # ==============================================================================
 st.markdown("""
     <style>
@@ -81,14 +81,14 @@ st.markdown("""
         padding: 15px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         height: 100%;
-        min-height: 120px; /* Altura mínima para ficar bonito */
+        min-height: 120px;
     }
     div[data-testid="stMetricLabel"] { 
         color: #94A3B8 !important; 
         font-size: 13px !important; 
         font-weight: 600 !important;
         text-transform: uppercase; 
-        white-space: normal !important; /* Permite quebrar linha no título */
+        white-space: normal !important;
         overflow-wrap: break-word;
     }
     div[data-testid="stMetricValue"] { 
@@ -118,7 +118,6 @@ st.markdown("""
         width: 100%;
     }
     
-    /* Inputs */
     div[data-baseweb="select"] > div, input {
         background-color: #112240 !important;
         border: 1px solid #334155 !important;
@@ -147,30 +146,41 @@ st.markdown("""
     .footer b { color: #B89B5E; }
 
     /* ============================================================
-       MOBILE EXTREME FIX - O QUEBRA-GALHO DEFINITIVO
+       MOBILE FIX V28 - A LÓGICA DE LARGURA MÍNIMA
        ============================================================ */
-    @media (max-width: 640px) {
-        /* 1. Título menor */
+    @media (max-width: 800px) { /* Aumentei o range para pegar tablets também */
+        
         h1 { font-size: 1.6rem !important; }
         
-        /* 2. FORÇAR COLUNAS A FICAREM UMA EMBAIXO DA OUTRA 
-           Isso pega os Cards e coloca verticalmente */
-        div[data-testid="column"] {
-            width: 100% !important;
+        /* O GRANDE SEGREDO: Permitir quebra de linha nas colunas */
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 1rem !important;
+        }
+        
+        /* Regra 1: Colunas da ÁREA PRINCIPAL (onde estão os cards)
+           Elas ganham largura mínima de 300px. Se a tela for menor que 600px (2x300),
+           elas AUTOMATICAMENTE vão uma para baixo da outra.
+        */
+        .main div[data-testid="column"] {
+            min-width: 300px !important;
             flex: 1 1 auto !important;
-            min-width: 100% !important;
-            margin-bottom: 15px !important; /* Espaço entre os cards empilhados */
+            margin-bottom: 10px !important;
+        }
+
+        /* Regra 2: Colunas da SIDEBAR (botões 12, 24, 60...)
+           Elas devem continuar PEQUENAS e lado a lado.
+           Então definimos min-width pequeno para elas.
+        */
+        section[data-testid="stSidebar"] div[data-testid="column"] {
+            min-width: 50px !important; 
         }
         
-        /* 3. Ajuste fino nos Cards */
+        /* Fonte maior para leitura fácil no celular */
         div[data-testid="stMetricValue"] { 
-            font-size: 32px !important; /* Agora posso aumentar a fonte de novo! */
-        }
-        div[data-testid="stMetricLabel"] {
-            font-size: 14px !important;
+            font-size: 30px !important; 
         }
         
-        /* 4. Padding lateral para não colar na borda do celular */
         .block-container {
             padding-left: 1rem !important;
             padding-right: 1rem !important;
@@ -378,13 +388,13 @@ if not df_curva.empty:
         domain = ['Curva Prefixada', 'Curva IPCA+ (Real)', 'Inflação Implícita']
         range_ = ['#3B82F6', '#F59E0B', '#64748B'] 
         
-        # GRÁFICO (COM LEGENDA EMBAIXO PARA MOBILE)
+        # GRÁFICO
         lines = alt.Chart(base_melt).mark_line(strokeWidth=2.5).encode(
             x=alt.X('Anos', axis=alt.Axis(grid=False, labelColor='#CBD5E1', titleColor='#B89B5E')),
             y=alt.Y('Taxa', axis=alt.Axis(grid=True, gridColor='#1E293B', labelColor='#CBD5E1', titleColor='#B89B5E')),
             color=alt.Color('Curva', scale=alt.Scale(domain=domain, range=range_), 
                             legend=alt.Legend(
-                                orient='bottom', # <--- OTIMIZAÇÃO MOBILE: Legenda embaixo
+                                orient='bottom',
                                 title=None, 
                                 labelColor='#E2E8F0',
                                 direction='horizontal'
