@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# CSS MASTER V24 - BOTÕES INTELIGENTES & UI PREMIUM
+# CSS MASTER V25 - MOBILE FIRST & UI PREMIUM
 # ==============================================================================
 st.markdown("""
     <style>
@@ -174,6 +174,30 @@ st.markdown("""
         box-shadow: 0 -4px 10px rgba(0,0,0,0.3);
     }
     .footer b { color: #B89B5E; }
+
+    /* --- MEDIA QUERIES (OTIMIZAÇÃO MOBILE) --- */
+    @media (max-width: 640px) {
+        /* Título menor */
+        h1 { font-size: 1.6rem !important; }
+        
+        /* Botão Sidebar um pouco maior para toque */
+        [data-testid="stSidebarCollapsedControl"] {
+            width: 48px !important;
+            height: 48px !important;
+        }
+
+        /* Ajuste do tamanho da fonte dos Cards para não quebrar linha */
+        div[data-testid="stMetricValue"] { 
+            font-size: 24px !important; 
+        }
+
+        /* Menos margem no topo para aproveitar espaço */
+        .block-container {
+            padding-top: 2rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -224,7 +248,7 @@ with st.sidebar:
     st.caption("PARAMETROS DA PROPOSTA")
     tipo_oferta = st.selectbox("Indexador", ["Prefixado", "IPCA + Spread", "% do CDI", "CDI + Spread"])
     
-    # --- NOVO: SELETOR DE UNIDADE ---
+    # SELETOR DE UNIDADE
     unidade_prazo = st.selectbox("Unidade de Prazo", ["Meses", "Anos", "Dias Úteis"])
     
     # Lógica de Botões Dinâmicos
@@ -232,7 +256,7 @@ with st.sidebar:
         b_labels = [1, 2, 5, 10]
         st.write("Prazo (Anos)")
     elif unidade_prazo == "Dias Úteis":
-        b_labels = [252, 504, 1260, 2520] # Padrão Anbima (1, 2, 5, 10 anos)
+        b_labels = [252, 504, 1260, 2520] 
         st.write("Prazo (Dias Úteis)")
     else: # Meses
         b_labels = [12, 24, 60, 120]
@@ -240,8 +264,7 @@ with st.sidebar:
     
     c1, c2, c3, c4 = st.columns([1,1,1,1], gap="small")
     
-    # Inicializa sessão se não existir
-    if "prazo_selecionado" not in st.session_state: st.session_state.prazo_selecionado = b_labels[1] # Padrão: 24 meses / 2 anos
+    if "prazo_selecionado" not in st.session_state: st.session_state.prazo_selecionado = b_labels[1] 
     
     def set_prazo(p): st.session_state.prazo_selecionado = p
     
@@ -257,26 +280,24 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # 3.3 BOX DE CENÁRIO (CÁLCULO DINÂMICO DOS DIAS)
+    # 3.3 BOX DE CENÁRIO
     df_curva = carregar_dados_por_data(data_escolhida)
     cdi_projetado = 0.0
     implicita_projetada = 0.0
     dias_target = 0
     
     if not df_curva.empty:
-        # Conversão Universal para Dias Úteis (Motor do App)
+        # Conversão para Dias Úteis
         if unidade_prazo == "Meses":
             dias_target = int(prazo_input * 21)
         elif unidade_prazo == "Anos":
             dias_target = int(prazo_input * 252)
-        else: # Dias Úteis
+        else: 
             dias_target = int(prazo_input)
             
-        # Busca na Curva
-        # Garante que não estoure o limite da curva
         max_dias_banco = df_curva['dias_corridos'].max()
         if dias_target > max_dias_banco:
-            st.warning(f"⚠️ Prazo excede limite da curva ({max_dias_banco} dias). Usando máximo.")
+            st.warning(f"⚠️ Prazo excede limite ({max_dias_banco} dias). Usando máximo.")
             dias_target = max_dias_banco
 
         idx = (np.abs(df_curva['dias_corridos'] - dias_target)).argmin()
@@ -367,6 +388,7 @@ if not df_curva.empty:
         st.markdown("### 📍 MAPA DO MERCADO")
         st.caption("Posição da sua oferta em relação às curvas de juros da ANBIMA.")
         
+        # PREPARAÇÃO DADOS GRÁFICO
         chart_data = df_curva[df_curva['dias_corridos'] % 2 == 0].copy().dropna()
         chart_data['Anos'] = chart_data['dias_corridos'] / 252
         
@@ -382,10 +404,17 @@ if not df_curva.empty:
         domain = ['Curva Prefixada', 'Curva IPCA+ (Real)', 'Inflação Implícita']
         range_ = ['#3B82F6', '#F59E0B', '#64748B'] 
         
+        # GRÁFICO (COM LEGENDA EMBAIXO PARA MOBILE)
         lines = alt.Chart(base_melt).mark_line(strokeWidth=2.5).encode(
             x=alt.X('Anos', axis=alt.Axis(grid=False, labelColor='#CBD5E1', titleColor='#B89B5E')),
             y=alt.Y('Taxa', axis=alt.Axis(grid=True, gridColor='#1E293B', labelColor='#CBD5E1', titleColor='#B89B5E')),
-            color=alt.Color('Curva', scale=alt.Scale(domain=domain, range=range_), legend=alt.Legend(orient='top', title=None, labelColor='#E2E8F0')),
+            color=alt.Color('Curva', scale=alt.Scale(domain=domain, range=range_), 
+                            legend=alt.Legend(
+                                orient='bottom', # <--- OTIMIZAÇÃO MOBILE: Legenda embaixo
+                                title=None, 
+                                labelColor='#E2E8F0',
+                                direction='horizontal'
+                            )),
             tooltip=['Anos', 'Curva', alt.Tooltip('Taxa', format='.2f')]
         )
         
