@@ -1,135 +1,124 @@
 import pandas as pd
-import sqlite3
 import requests
+import sqlite3
 import numpy as np
-from scipy.interpolate import PchipInterpolator
-from io import BytesIO
-import datetime
-import re
+import xml.etree.ElementTree as ET
+from datetime import datetime
+from scipy.interpolate import CubicSpline
 
-print("🚀 Iniciando ETL FAIR RATE (Motor: ANBIMA)...")
+# --- CONFIGURAÇÕES ---
+URL_ANBIMA = "https://www.anbima.com.br/informacoes/est-termo/cz.xml"
+DB_NAME = "meu_app.db"
 
-# --- 1. CONFIGURAÇÕES ---
-URL_ANBIMA = "https://www.anbima.com.br/informacoes/est-termo/CZ-down.asp"
-
-def processar_dados_anbima():
-    # 1. Download do Arquivo
-    print("⏳ Baixando dados da ANBIMA...")
-    try:
-        response = requests.get(URL_ANBIMA)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"❌ Erro no download: {e}")
-        return
-
-    # 2. Ler o conteúdo
-    conteudo = response.content.decode('latin-1')
-    linhas = conteudo.split('\n')
-    
-    print("✅ Download concluído. Processando arquivo...")
-
-    # --- NOVO: IDENTIFICAR A DATA DO ARQUIVO ---
-    # A ANBIMA costuma colocar a data na primeira linha ou no nome do arquivo
-    # Vamos tentar achar um padrão de data (DD/MM/AAAA) nas primeiras 5 linhas
-    data_arquivo = datetime.datetime.now().strftime("%d/%m/%Y") # Valor padrão (hoje)
-    
-    padrao_data = r"(\d{2}/\d{2}/\d{4})" # Regex para procurar datas
-    
-    for i, linha in enumerate(linhas[:5]):
-        match = re.search(padrao_data, linha)
-        if match:
-            data_arquivo = match.group(1)
-            print(f"📅 Data de Referência encontrada no arquivo: {data_arquivo}")
-            break
-            
-    # Caso não ache (fallback), usamos a data informada por você para hoje
-    if "30/01/2026" in conteudo: # Verificação simples extra
-         pass 
-
-    # 3. Parser (Extração dos dados)
-    ettj_dados = {
-        'Vertices': [],
-        'ETTJ_IPCA': [],
-        'ETTJ_PREF': [],
-        'Inflacao_Implicita': []
+def buscar_dados_anbima():
+    print(f"🔄 Conectando à ANBIMA: {URL_ANBIMA}")
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
     
-    section = False
-    
-    for linha in linhas:
-        linha = linha.strip()
+    try:
+        response = requests.get(URL_ANBIMA, headers=headers, timeout=10)
+        response.raise_for_status() # Garante que não deu erro 404/500
         
-        if "ETTJ Inflação Implicita" in linha or "ETTJ Inflação Implícita" in linha:
-            section = True
-            continue
-            
-        if section and "Vertices" in linha:
-            continue 
-            
-        if section and (not linha or 'PREFIXADOS' in linha or 'Erro Título' in linha):
-            break
-            
-        if section and ';' in linha:
-            parts = linha.split(';')
-            try:
-                if len(parts) > 3:
-                    v = int(parts[0].replace('.', '').strip())
-                    ipca = float(parts[1].replace(',', '.').strip())
-                    pre = float(parts[2].replace(',', '.').strip())
-                    inf = float(parts[3].replace(',', '.').strip())
-                    
-                    ettj_dados['Vertices'].append(v)
-                    ettj_dados['ETTJ_IPCA'].append(ipca)
-                    ettj_dados['ETTJ_PREF'].append(pre)
-                    ettj_dados['Inflacao_Implicita'].append(inf)
-            except:
-                continue
+        # O encoding da ANBIMA as vezes é latin-1, forçamos para evitar erro de acento
+        response.encoding = 'iso-8859-1' 
+        
+        return response.content
+    except Exception as e:
+        print(f"❌ Erro ao baixar dados: {e}")
+        return None
 
-    df = pd.DataFrame(ettj_dados)
+def processar_xml(xml_content):
+    print("⚙️ Processando XML...")
+    root = ET.fromstring(xml_content)
     
-    if df.empty:
-        print("⚠️ Atenção: A tabela veio vazia.")
-        return
+    # Pegar a data de referência do arquivo
+    data_ref = root.find(".//data").text
+    print(f"📅 Data encontrada no XML: {data_ref}")
+    
+    dados = []
+    
+    # Iterar sobre as curvas (Prefixado e IPCA)
+    for grupo in root.findall(".//grupo"):
+        indice = grupo.attrib['indice'] # Ex: PRE, IPCA, TR
+        
+        if indice in ['PRE', 'IPCA']:
+            for vertice in grupo.findall("vertice"):
+                dias = int(vertice.attrib['dias'])
+                taxa = float(vertice.attrib['taxa'].replace(',', '.'))
+                
+                dados.append({
+                    'indice': indice,
+                    'dias': dias,
+                    'taxa': taxa
+                })
+    
+    df = pd.DataFrame(dados)
+    return df, data_ref
 
-    # 4. Interpolação PCHIP
-    print("➗ Calculando Interpolação (PCHIP)...")
-    df = df.sort_values('Vertices').drop_duplicates(subset=['Vertices'])
+def interpolar_curvas(df_raw, data_ref):
+    print("📐 Calculando interpolação (Scipy)...")
     
-    max_dias = df['Vertices'].max()
-    novos_vertices = np.arange(1, max_dias + 1)
+    # Separar as curvas
+    df_pre = df_raw[df_raw['indice'] == 'PRE'].sort_values('dias')
+    df_ipca = df_raw[df_raw['indice'] == 'IPCA'].sort_values('dias')
     
-    pchip_ipca = PchipInterpolator(df['Vertices'], df['ETTJ_IPCA'])
-    pchip_pre = PchipInterpolator(df['Vertices'], df['ETTJ_PREF'])
-    pchip_inf = PchipInterpolator(df['Vertices'], df['Inflacao_Implicita'])
+    # Criar funções de interpolação (Cubic Spline)
+    # Isso cria uma curva suave entre os pontos que a ANBIMA deu
+    cs_pre = CubicSpline(df_pre['dias'], df_pre['taxa'])
+    cs_ipca = CubicSpline(df_ipca['dias'], df_ipca['taxa'])
     
-    # Gera o DataFrame final
+    # Criar um range de dias úteis completo (do dia 1 até o dia 5000)
+    dias_full = np.arange(1, 5001)
+    
+    # Calcular as taxas para todos esses dias
+    taxas_pre = cs_pre(dias_full)
+    taxas_ipca = cs_ipca(dias_full)
+    
+    # Montar o DataFrame final
     df_final = pd.DataFrame({
-        'dias_corridos': novos_vertices,
-        'taxa_ipca': pchip_ipca(novos_vertices),
-        'taxa_pre': pchip_pre(novos_vertices),
-        'inflacao_implicita': pchip_inf(novos_vertices)
+        'dias_corridos': dias_full,
+        'taxa_pre': taxas_pre,
+        'taxa_ipca': taxas_ipca
     })
     
-    # --- NOVO: ADICIONAR A COLUNA "E" (DATA) ---
-    df_final['data_referencia'] = data_arquivo
+    # Calcular Inflação Implícita (Fisher)
+    # (1 + Pre) = (1 + Real) * (1 + Implicita)
+    df_final['inflacao_implicita'] = (
+        ((1 + df_final['taxa_pre']/100) / (1 + df_final['taxa_ipca']/100)) - 1
+    ) * 100
     
-    # 5. Salvar no Banco
-    conn = sqlite3.connect('meu_app.db')
+    df_final['data_referencia'] = data_ref
     
-    # Salva tabela (substituindo a antiga)
-    df_final.to_sql('curvas_anbima', conn, if_exists='replace', index=False)
-    
-    # Atualiza metadata
-    cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS metadata (chave TEXT PRIMARY KEY, valor TEXT)")
-    # Agora salvamos a data do ARQUIVO, não a data de hoje (hora do download)
-    cursor.execute("INSERT OR REPLACE INTO metadata (chave, valor) VALUES ('ultima_atualizacao', ?)", (data_arquivo,))
-    
-    conn.commit()
-    conn.close()
-    
-    print(f"💾 Sucesso! {len(df_final)} linhas salvas.")
-    print(f"✅ Coluna de Data adicionada: {data_arquivo}")
+    return df_final
 
+def salvar_banco(df_final, data_ref):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # Verifica se essa data já existe para não duplicar
+    cursor.execute("SELECT count(*) FROM curvas_anbima WHERE data_referencia = ?", (data_ref,))
+    existe = cursor.fetchone()[0]
+    
+    if existe > 0:
+        print(f"⚠️ Dados de {data_ref} já existem no banco. Atualizando...")
+        cursor.execute("DELETE FROM curvas_anbima WHERE data_referencia = ?", (data_ref,))
+    
+    df_final.to_sql('curvas_anbima', conn, if_exists='append', index=False)
+    conn.close()
+    print("✅ Dados salvos com sucesso no SQLite!")
+
+# --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    processar_dados_anbima()
+    content = buscar_dados_anbima()
+    
+    if content:
+        df_raw, data_ref = processar_xml(content)
+        
+        if not df_raw.empty:
+            df_interpolado = interpolar_curvas(df_raw, data_ref)
+            salvar_banco(df_interpolado, data_ref)
+        else:
+            print("❌ O XML estava vazio ou com formato inesperado.")
+    else:
+        print("❌ Falha na conexão.")
