@@ -3,3 +3,6 @@ pandas
 numpy
 altair
 requests
+scipy
+lxml
+openpyxl
