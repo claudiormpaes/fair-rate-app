@@ -25,7 +25,7 @@ jobs:
           python-version: '3.9'
 
       - name: Instalar bibliotecas
-        # AQUI ESTÁ A CORREÇÃO: Adicionei 'scipy' e 'lxml' que faltavam
+        # AQUI ESTÁ A CORREÇÃO: Adicionamos 'scipy' que estava faltando
         run: |
           pip install pandas requests lxml openpyxl numpy scipy
 
