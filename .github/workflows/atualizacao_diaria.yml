@@ -2,7 +2,7 @@ name: Robô ETL Anbima
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5' # 07:00h Brasil
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Instalar bibliotecas (Via requirements)
+      - name: Instalar bibliotecas
         run: pip install -r requirements.txt
 
       - name: RODAR O ETL
@@ -30,5 +30,5 @@ jobs:
           git config --global user.name 'Robo Claudio Paes'
           git config --global user.email 'robo@claudiopaes.com.br'
           git add meu_app.db
-          git commit -m "Atualização automática dos dados" || echo "Sem mudanças"
+          git commit -m "Atualização automática" || echo "Sem mudanças"
           git push
