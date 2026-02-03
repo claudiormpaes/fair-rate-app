@@ -2,8 +2,7 @@ import pandas as pd
 import requests
 import sqlite3
 import numpy as np
-import io
-from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from scipy.interpolate import CubicSpline
 
@@ -12,119 +11,113 @@ URL_BASE = "https://www.anbima.com.br/informacoes/est-termo/CZ.asp"
 DB_NAME = "meu_app.db"
 
 def buscar_dados_anbima():
-    print(f"🔄 Acessando ANBIMA: {URL_BASE}")
+    print(f"🔄 Conectando à ANBIMA...")
     session = requests.Session()
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     
+    # Lógica Inteligente de Data (Sempre D-1 útil)
+    hoje = datetime.now()
+    if hoje.weekday() == 0: # Se é Segunda, pega Sexta
+        data_target = hoje - timedelta(days=3)
+    elif hoje.weekday() == 6: # Se é Domingo, pega Sexta
+        data_target = hoje - timedelta(days=2)
+    else: # Terça a Sábado, pega D-1
+        data_target = hoje - timedelta(days=1)
+        
+    data_str = data_target.strftime("%d/%m/%Y")
+    
+    # Parâmetros para BAIXAR O XML (escolha=2)
+    payload = {
+        'Dt_Ref': data_str,
+        'escolha': '2', # 2 = Download
+        'saida': 'xml', # Formato XML
+        'idioma': 'PT'
+    }
+    
+    print(f"⬇️ Solicitando XML para a data: {data_str}...")
+    
     try:
-        # PASSO 1: Descobrir a data correta
-        response_get = session.get(URL_BASE, headers=headers, timeout=15)
-        response_get.raise_for_status()
+        response = session.post(URL_BASE, data=payload, headers=headers, timeout=20)
+        response.raise_for_status()
+        response.encoding = 'iso-8859-1' # Encoding padrão da Anbima
         
-        soup = BeautifulSoup(response_get.content, 'html.parser')
-        input_data = soup.find('input', {'name': 'Dt_Ref'})
-        
-        data_consulta = None
-        
-        # Tenta pegar a data que já vem preenchida no site (é a mais confiável)
-        if input_data and input_data.get('value'):
-            data_consulta = input_data['value']
-            print(f"📅 Data sugerida pelo site: {data_consulta}")
-        
-        # Se falhar, usa D-1 (Ontem) em vez de hoje
-        if not data_consulta:
-            ontem = datetime.now() - timedelta(days=1)
-            # Se ontem foi domingo (6), volta para sexta (4)
-            if ontem.weekday() == 6: ontem -= timedelta(days=2)
-            # Se ontem foi sábado (5), volta para sexta (4)
-            elif ontem.weekday() == 5: ontem -= timedelta(days=1)
+        # Verifica se veio uma página de erro HTML em vez de XML
+        if "<!DOCTYPE html" in response.text[:100] or "<html" in response.text[:100]:
+            print("⚠️ O site retornou HTML em vez de XML (provavelmente dados indisponíveis para esta data).")
+            return None, None
             
-            data_consulta = ontem.strftime("%d/%m/%Y")
-            print(f"⚠️ Data não encontrada no HTML. Tentando dia útil anterior: {data_consulta}")
-
-        # PASSO 2: Pedir a tabela "Em Tela"
-        payload = {
-            'Dt_Ref': data_consulta,
-            'escolha': '1', # 1 = Em Tela
-            'idioma': 'PT',
-            'saida': 'xls'
-        }
-        
-        print(f"🖥️ Consultando dados para {data_consulta}...")
-        response_post = session.post(URL_BASE, data=payload, headers=headers, timeout=20)
-        response_post.raise_for_status()
-        response_post.encoding = response_post.apparent_encoding
-        
-        return response_post.text, data_consulta
-
+        return response.text, data_str
     except Exception as e:
         print(f"❌ Erro na conexão: {e}")
         return None, None
 
-def processar_html(html_content, data_ref):
-    print("⚙️ Lendo tabelas...")
+def processar_xml(xml_content):
+    print("⚙️ Processando estrutura do XML...")
     
     try:
-        # Lê tabelas convertendo padrão BR (1.000,00) para Python (1000.00)
-        dfs = pd.read_html(io.StringIO(html_content), decimal=',', thousands='.', header=0)
-        
-        df_dados = pd.DataFrame()
-        
-        for df in dfs:
-            # Limpa nomes das colunas (remove espaços e poe minusculo)
-            cols = [str(c).lower().strip() for c in df.columns]
-            
-            # Debug: Mostra colunas encontradas para ajudar
-            # print(f"Tabela encontrada com colunas: {cols}")
-
-            # A tabela certa tem 'vertice' e ('prefixados' ou 'pre')
-            tem_vertice = any('vértice' in c or 'vertice' in c for c in cols)
-            tem_pre = any('prefixado' in c or 'pre' in c for c in cols)
-            
-            if tem_vertice and tem_pre:
-                # Renomeia colunas pela POSIÇÃO (mais seguro que pelo nome)
-                # Col 0: Vértice | Col 1: Dias | Col 2: Pré | Col 3: IPCA
-                if len(df.columns) >= 4:
-                    df = df.iloc[:, :4] # Pega só as 4 primeiras
-                    df.columns = ['vertice', 'dias', 'taxa_pre', 'taxa_ipca']
-                    
-                    # Garante números
-                    df['dias'] = pd.to_numeric(df['dias'], errors='coerce')
-                    df['taxa_pre'] = pd.to_numeric(df['taxa_pre'], errors='coerce')
-                    df['taxa_ipca'] = pd.to_numeric(df['taxa_ipca'], errors='coerce')
-                    
-                    df_dados = df.dropna()
-                    print(f"✅ Tabela encontrada! {len(df_dados)} vértices importados.")
-                    break
-        
-        if df_dados.empty:
-            print("❌ Nenhuma tabela válida encontrada. O site pode ter retornado 'Não há dados'.")
-            return pd.DataFrame()
-            
-        return df_dados
-
-    except Exception as e:
-        print(f"❌ Erro ao ler HTML: {e}")
+        root = ET.fromstring(xml_content)
+    except ET.ParseError:
+        print("❌ Conteúdo inválido (não é XML).")
         return pd.DataFrame()
 
+    dados = []
+    
+    # NOVA LÓGICA: Procura a tag <VERTICES> direto
+    # Exemplo do arquivo: <VERTICES Vertice='252' IPCA='8,8600' Prefixados='13,2712' ... />
+    
+    for item in root.findall(".//VERTICES"):
+        attr = item.attrib
+        
+        try:
+            # 1. Tratar Vértice (Dias)
+            # Remove pontos de milhar (Ex: '1.008' -> '1008')
+            dias_str = attr.get('Vertice', '').replace('.', '')
+            dias = int(dias_str)
+            
+            # 2. Tratar Taxas (Pré e IPCA)
+            # Pode vir vazio '' ou com virgula '13,27'
+            pre_str = attr.get('Prefixados', '').replace(',', '.')
+            ipca_str = attr.get('IPCA', '').replace(',', '.')
+            
+            # Se algum campo estiver vazio, pula esse vértice
+            if not pre_str or not ipca_str:
+                continue
+                
+            taxa_pre = float(pre_str)
+            taxa_ipca = float(ipca_str)
+            
+            dados.append({
+                'dias': dias,
+                'taxa_pre': taxa_pre,
+                'taxa_ipca': taxa_ipca
+            })
+            
+        except ValueError:
+            continue # Pula erros de conversão
+            
+    df = pd.DataFrame(dados)
+    
+    if not df.empty:
+        print(f"✅ Sucesso! {len(df)} vértices extraídos.")
+    else:
+        print("❌ XML lido, mas nenhum dado útil encontrado.")
+        
+    return df
+
 def interpolar_curvas(df_raw, data_ref):
-    print("📐 Calculando curva completa (0 a 5000 dias)...")
+    print("📐 Calculando interpolação (0 a 5000 dias)...")
     
     df_raw = df_raw.sort_values('dias').drop_duplicates('dias')
     
-    # Remove zeros ou negativos que quebram log/divisão
-    df_clean = df_raw[(df_raw['taxa_pre'] > 0) & (df_raw['taxa_ipca'] > 0)]
-    
-    if len(df_clean) < 5:
+    if len(df_raw) < 5:
         print("❌ Poucos pontos para interpolar.")
         return pd.DataFrame()
 
     try:
-        # CubicSpline para suavizar a curva
-        cs_pre = CubicSpline(df_clean['dias'], df_clean['taxa_pre'])
-        cs_ipca = CubicSpline(df_clean['dias'], df_clean['taxa_ipca'])
+        cs_pre = CubicSpline(df_raw['dias'], df_raw['taxa_pre'])
+        cs_ipca = CubicSpline(df_raw['dias'], df_raw['taxa_ipca'])
         
         dias_full = np.arange(1, 5001)
         
@@ -135,7 +128,6 @@ def interpolar_curvas(df_raw, data_ref):
             'data_referencia': data_ref
         })
         
-        # Fórmula de Fisher: (1+Pre) = (1+Real) * (1+Implicita)
         df_final['inflacao_implicita'] = (
             ((1 + df_final['taxa_pre']/100) / (1 + df_final['taxa_ipca']/100)) - 1
         ) * 100
@@ -161,24 +153,23 @@ def salvar_banco(df_final, data_ref):
         )
     ''')
     
-    # Apaga dados velhos dessa mesma data se houver (para não duplicar)
+    # Limpa dados anteriores da mesma data
     cursor.execute("DELETE FROM curvas_anbima WHERE data_referencia = ?", (data_ref,))
     
     df_final.to_sql('curvas_anbima', conn, if_exists='append', index=False)
     conn.commit()
     conn.close()
-    print("✅ Banco de dados salvo com sucesso!")
+    print("✅ Banco de dados atualizado com sucesso!")
 
 if __name__ == "__main__":
-    html, data_ref = buscar_dados_anbima()
+    xml_content, data_ref = buscar_dados_anbima()
     
-    if html and data_ref:
-        df_raw = processar_html(html, data_ref)
+    if xml_content:
+        df_raw = processar_xml(xml_content)
         if not df_raw.empty:
             df_final = interpolar_curvas(df_raw, data_ref)
             salvar_banco(df_final, data_ref)
         else:
-            print("❌ Falha: Dados vazios.")
-            exit(1) # Força erro no GitHub
+            exit(1) # Erro no GitHub
     else:
-        exit(1)
+        exit(1) # Erro no GitHub
