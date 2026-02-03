@@ -1,20 +1,15 @@
 name: Robô ETL Anbima
 
-# Quando ele roda?
 on:
   schedule:
-    # Roda às 10:00 UTC (que é 07:00 da manhã no Brasil) de Segunda a Sexta
-    - cron: '0 10 * * 1-5'
-  workflow_dispatch:      # Permite rodar manualmente clicando no botão
+    - cron: '0 10 * * 1-5' # 07:00h Brasil
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    # Dá permissão para o robô escrever no seu repositório (salvar o banco)
     permissions:
       contents: write
-      
     steps:
       - name: Baixar código
         uses: actions/checkout@v3
@@ -24,10 +19,8 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Instalar bibliotecas
-        # AQUI ESTÁ A CORREÇÃO: Adicionamos 'scipy' que estava faltando
-        run: |
-          pip install pandas requests lxml openpyxl numpy scipy
+      - name: Instalar bibliotecas (Via requirements)
+        run: pip install -r requirements.txt
 
       - name: RODAR O ETL
         run: python etl_anbima.py
@@ -37,6 +30,5 @@ jobs:
           git config --global user.name 'Robo Claudio Paes'
           git config --global user.email 'robo@claudiopaes.com.br'
           git add meu_app.db
-          # O "|| echo" serve para não dar erro se não tiver dados novos no dia
-          git commit -m "Atualização automática dos dados" || echo "Sem mudanças para commitar"
+          git commit -m "Atualização automática dos dados" || echo "Sem mudanças"
           git push
