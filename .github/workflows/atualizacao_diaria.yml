@@ -1,5 +1,6 @@
-name: Robô ETL Anbima
-
+- name: Instalar bibliotecas
+        run: |
+          pip install pandas requests lxml openpyxl numpy scipy
 on:
   schedule:
     - cron: '0 10 * * 1-5'
