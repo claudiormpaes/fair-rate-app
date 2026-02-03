@@ -7,59 +7,55 @@ from datetime import datetime, timedelta
 from scipy.interpolate import CubicSpline
 
 # --- CONFIGURAÇÕES ---
-# URL do formulário (backend)
-URL_POST = "https://www.anbima.com.br/informacoes/est-termo/CZ.asp"
-# URL da página visual (para o Referer)
-URL_REFERER = "https://www.anbima.com.br/pt_br/informar/curvas-de-juros-fechamento.htm"
+URL_FORM = "https://www.anbima.com.br/pt_br/informar/curvas-de-juros-fechamento.htm" # Página Visível
+URL_ACTION = "https://www.anbima.com.br/informacoes/est-termo/CZ.asp" # Backend
 DB_NAME = "meu_app.db"
 
 def buscar_xml_anbima():
-    print(f"🔄 Iniciando conexão com ANBIMA...")
+    print(f"🔄 Iniciando sessão com ANBIMA...")
     
-    # 1. Calcular a Data Correta (Sempre D-1 útil)
-    # Se hoje é 03/02, queremos 02/02. Se for segunda, queremos sexta.
+    # 1. Calcular a data D-1 (Ontem útil)
     hoje = datetime.now()
-    
-    if hoje.weekday() == 0: # Segunda-feira -> Pega Sexta
+    if hoje.weekday() == 0: # Segunda -> Sexta
         data_target = hoje - timedelta(days=3)
-    elif hoje.weekday() == 6: # Domingo -> Pega Sexta
+    elif hoje.weekday() == 6: # Domingo -> Sexta
         data_target = hoje - timedelta(days=2)
-    else: # Terça a Sábado -> Pega Ontem
+    else: # Terça a Sábado -> Ontem
         data_target = hoje - timedelta(days=1)
         
     data_str = data_target.strftime("%d/%m/%Y")
     
-    # 2. Configurar Headers para parecer um navegador real
+    # 2. Criar Sessão (O Segredo!)
     session = requests.Session()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': URL_REFERER, # <--- O SEGREDO ESTÁ AQUI
-        'Origin': 'https://www.anbima.com.br',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': URL_FORM,
+        'Origin': 'https://www.anbima.com.br'
     }
-    
-    # 3. Payload (Simulando: Download -> XML -> Data -> Consultar)
-    payload = {
-        'escolha': '2',      # 2 = Download
-        'saida': 'xml',      # Formato XML
-        'idioma': 'PT',
-        'Dt_Ref': data_str   # A data calculada (D-1)
-    }
-    
-    print(f"⬇️ Baixando XML para data: {data_str}...")
     
     try:
-        # Faz o POST direto (simulando o clique em Consultar)
-        response = session.post(URL_POST, data=payload, headers=headers, timeout=30)
-        response.raise_for_status()
+        # PASSO A: Acessar a página principal para pegar os Cookies
+        print("🍪 Obtendo cookies de sessão...")
+        session.get(URL_FORM, headers=headers, timeout=15)
         
-        # Ajusta encoding
+        # PASSO B: Pedir o Download do XML
+        payload = {
+            'escolha': '2',      # Download
+            'saida': 'xml',      # XML
+            'idioma': 'PT',
+            'Dt_Ref': data_str
+        }
+        
+        print(f"⬇️ Baixando XML para: {data_str}...")
+        response = session.post(URL_ACTION, data=payload, headers=headers, timeout=30)
+        response.raise_for_status()
         response.encoding = 'iso-8859-1'
         
-        # Verifica se deu certo ou se veio página de erro
-        if "<!DOCTYPE html" in response.text[:200] or "<html" in response.text[:200]:
-            print("⚠️ O site retornou HTML de erro. Provavelmente a data ainda não está disponível.")
-            print(f"Conteúdo parcial: {response.text[:100]}...")
+        # Validação: Se não tiver a tag <CURVAZERO>, não é o arquivo certo
+        if "<CURVAZERO>" not in response.text and "<curvazero>" not in response.text:
+            print("⚠️ O site retornou algo que não é o XML esperado.")
+            # Debug: mostra o começo do erro para sabermos o que é
+            print(f"Inicio do conteúdo: {response.text[:200]}") 
             return None, None
             
         return response.text, data_str
@@ -74,37 +70,30 @@ def processar_xml(xml_content):
     try:
         root = ET.fromstring(xml_content)
     except ET.ParseError:
-        print("❌ Arquivo inválido (não é XML).")
+        print("❌ XML mal formado.")
         return pd.DataFrame()
 
     dados = []
     
-    # O XML que você mandou tem a tag <VERTICES ... /> dentro de <ETTJ>
-    # Vamos buscar todas as tags VERTICES em qualquer lugar do arquivo
+    # Busca todas as tags VERTICES (maiúsculo, conforme seu arquivo)
+    # Estrutura: <VERTICES Vertice='252' IPCA='8,8600' Prefixados='13,2712' ... />
     elementos = root.findall(".//VERTICES")
     
-    if not elementos:
-        # Tenta minúsculo por garantia
-        elementos = root.findall(".//vertices")
-    
-    print(f"🔎 Encontrados {len(elementos)} vértices no arquivo.")
+    print(f"🔎 Encontrados {len(elementos)} pontos de curva.")
 
     for item in elementos:
         attr = item.attrib
-        
         try:
-            # Estrutura do seu arquivo:
-            # Vertice='252' IPCA='8,8600' Prefixados='13,2712'
-            
-            # 1. Dias (Vertice) - remover ponto de milhar (1.008 -> 1008)
-            dias_raw = attr.get('Vertice') or attr.get('vertice')
-            dias = int(dias_raw.replace('.', ''))
+            # 1. Dias (Vertice) - remover ponto (1.008 -> 1008)
+            dias_str = attr.get('Vertice', '').replace('.', '')
+            if not dias_str: continue
+            dias = int(dias_str)
             
             # 2. Taxas - trocar vírgula por ponto
             pre_str = attr.get('Prefixados', '').replace(',', '.')
             ipca_str = attr.get('IPCA', '').replace(',', '.')
             
-            # Se a taxa estiver vazia, pula
+            # Se faltar taxa, pula
             if not pre_str or not ipca_str:
                 continue
                 
@@ -113,32 +102,29 @@ def processar_xml(xml_content):
                 'taxa_pre': float(pre_str),
                 'taxa_ipca': float(ipca_str)
             })
-            
-        except (ValueError, AttributeError):
+        except ValueError:
             continue
             
     df = pd.DataFrame(dados)
     return df
 
 def interpolar_curvas(df_raw, data_ref):
-    print("📐 Gerando curva completa (Scipy)...")
+    print("📐 Gerando curva (Scipy CubicSpline)...")
     
     df_raw = df_raw.sort_values('dias').drop_duplicates('dias')
     
-    # Remove inconsistências
+    # Limpeza básica
     df_clean = df_raw[(df_raw['taxa_pre'] > 0) & (df_raw['taxa_ipca'] > 0)]
     
-    if len(df_clean) < 10:
-        print("❌ Dados insuficientes para interpolar.")
+    if len(df_clean) < 5:
+        print("❌ Poucos dados para interpolar.")
         return pd.DataFrame()
 
     try:
-        # Cria a função da curva
         cs_pre = CubicSpline(df_clean['dias'], df_clean['taxa_pre'])
         cs_ipca = CubicSpline(df_clean['dias'], df_clean['taxa_ipca'])
         
-        # Gera dias de 1 a 5000 (aprox 20 anos)
-        dias_full = np.arange(1, 5001)
+        dias_full = np.arange(1, 5001) # Projeta até 5000 dias úteis
         
         df_final = pd.DataFrame({
             'dias_corridos': dias_full,
@@ -163,7 +149,6 @@ def salvar_banco(df_final, data_ref):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Cria tabela se não existir
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS curvas_anbima (
             dias_corridos INTEGER,
@@ -174,27 +159,24 @@ def salvar_banco(df_final, data_ref):
         )
     ''')
     
-    # Remove dados antigos dessa data para não duplicar
+    # Remove duplicatas da data
     cursor.execute("DELETE FROM curvas_anbima WHERE data_referencia = ?", (data_ref,))
     
-    # Salva
     df_final.to_sql('curvas_anbima', conn, if_exists='append', index=False)
     conn.commit()
     conn.close()
-    print("✅ Sucesso! Banco atualizado.")
+    print(f"✅ Sucesso! Dados de {data_ref} salvos no banco.")
 
 if __name__ == "__main__":
     xml_content, data_ref = buscar_xml_anbima()
     
     if xml_content:
         df_raw = processar_xml(xml_content)
-        
         if not df_raw.empty:
             df_final = interpolar_curvas(df_raw, data_ref)
             salvar_banco(df_final, data_ref)
         else:
-            print("❌ XML baixado mas vazio de dados.")
+            print("❌ XML válido, mas sem dados de vértices.")
             exit(1)
     else:
-        # Se falhou o download, encerra com erro para o GitHub avisar
         exit(1)
