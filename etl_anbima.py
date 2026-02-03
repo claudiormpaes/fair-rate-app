@@ -2,12 +2,11 @@ import pandas as pd
 import requests
 import sqlite3
 import numpy as np
-from datetime import datetime
-from scipy.interpolate import PchipInterpolator # Usando a matemática do seu script
+from datetime import datetime, timedelta
+from scipy.interpolate import PchipInterpolator
 import io
 
 # --- CONFIGURAÇÕES ---
-# Essa é a URL do seu script local. Ela baixa o arquivo mais recente direto!
 URL_DIRETA = "https://www.anbima.com.br/informacoes/est-termo/CZ-down.asp"
 DB_NAME = "meu_app.db"
 
@@ -21,92 +20,98 @@ def buscar_dados_txt():
     try:
         response = requests.get(URL_DIRETA, headers=headers, timeout=30)
         response.raise_for_status()
-        
-        # O arquivo geralmente vem em Latin-1 (padrão Brasil antigo)
-        response.encoding = 'latin-1'
-        
+        # CP1252 é o padrão Windows BR (melhor que latin-1 para Anbima)
+        response.encoding = 'cp1252' 
         return response.text
     except Exception as e:
         print(f"❌ Erro no download: {e}")
         return None
 
+def calcular_d1():
+    # Calcula o dia útil anterior
+    hoje = datetime.now()
+    if hoje.weekday() == 0: # Segunda -> Sexta
+        d1 = hoje - timedelta(days=3)
+    elif hoje.weekday() == 6: # Domingo -> Sexta
+        d1 = hoje - timedelta(days=2)
+    else: # Terça a Sábado -> Ontem
+        d1 = hoje - timedelta(days=1)
+    return d1.strftime("%d/%m/%Y")
+
 def processar_texto(conteudo_txt):
     print("⚙️ Processando arquivo de texto...")
     
     linhas = conteudo_txt.split('\n')
-    dados = []
     
-    # Variáveis para controlar a leitura (igual ao seu script)
+    # DEBUG: Mostra a primeira linha para conferirmos o formato
+    if len(linhas) > 0:
+        print(f"📄 Cabeçalho do arquivo: {linhas[0].strip()}")
+    
+    dados = []
     lendo_secao = False
     
     for linha in linhas:
         linha = linha.strip()
         
-        # Procura o cabeçalho da seção de inflação (Lógica do seu script)
+        # Procura seção de inflação
         if "ETTJ Inflação Implicita" in linha or "ETTJ Inflação Implícita" in linha:
             lendo_secao = True
             continue
             
         if lendo_secao:
-            # Se a linha começar com "Vertices", é cabeçalho, pula
-            if "Vertices" in linha or "Vértice" in linha:
-                continue
-                
-            # Se a linha estiver vazia ou mudar de seção, para
-            if not linha or "PREFIXADOS" in linha or "Erro" in linha:
-                break
+            if "Vertices" in linha or "Vértice" in linha: continue
+            if not linha or "PREFIXADOS" in linha or "Erro" in linha: break
             
-            # Processa a linha: 252;6,50;10,50;4,00
+            # Processa: 252;6,50;10,50;4,00
             if ';' in linha:
                 partes = linha.split(';')
                 try:
-                    # Coluna 0: Dias | Col 1: IPCA | Col 2: Pré
                     dias = int(partes[0].replace('.', ''))
                     ipca = float(partes[1].replace(',', '.'))
                     pre = float(partes[2].replace(',', '.'))
                     
-                    dados.append({
-                        'dias': dias,
-                        'taxa_pre': pre,
-                        'taxa_ipca': ipca
-                    })
+                    dados.append({'dias': dias, 'taxa_pre': pre, 'taxa_ipca': ipca})
                 except (ValueError, IndexError):
                     continue
 
     if not dados:
-        print("❌ Não foi possível ler os dados do texto.")
+        print("❌ Não foi possível ler os dados.")
         return pd.DataFrame(), None
 
     df = pd.DataFrame(dados)
     
-    # Tenta achar a data no arquivo (geralmente está na primeira linha)
-    # Ex: "Curva Zero - 02/02/2026"
+    # LÓGICA DE DATA (Corrigida)
+    # Tenta ler do arquivo. Se falhar, usa D-1 calculado.
+    data_ref = None
     try:
-        data_ref = linhas[0].split('-')[-1].strip()
-        # Valida se parece uma data
-        datetime.strptime(data_ref, "%d/%m/%Y")
+        # Tenta pegar "02/02/2026" da primeira linha
+        # Ex: "Curva Zero - 02/02/2026"
+        cabeçalho = linhas[0]
+        if '-' in cabeçalho:
+            possivel_data = cabeçalho.split('-')[-1].strip()
+            datetime.strptime(possivel_data, "%d/%m/%Y") # Testa se é data válida
+            data_ref = possivel_data
+            print(f"📅 Data extraída do arquivo: {data_ref}")
     except:
-        # Se falhar, usa hoje como fallback
-        data_ref = datetime.now().strftime("%d/%m/%Y")
+        pass
         
-    print(f"✅ Dados extraídos! Referência: {data_ref}")
+    if not data_ref:
+        data_ref = calcular_d1()
+        print(f"⚠️ Data não encontrada no cabeçalho. Usando cálculo D-1: {data_ref}")
+        
     return df, data_ref
 
 def interpolar_curvas(df_raw, data_ref):
     print("📐 Interpolando curvas (PchipInterpolator)...")
     
     df_raw = df_raw.sort_values('dias').drop_duplicates('dias')
-    
-    # Remove inconsistências
     df_clean = df_raw[(df_raw['taxa_pre'] > 0) & (df_raw['taxa_ipca'] > 0)]
     
     if len(df_clean) < 5:
-        print("❌ Poucos dados para interpolar.")
+        print("❌ Poucos dados.")
         return pd.DataFrame()
 
     try:
-        # Usando PchipInterpolator (igual ao seu script desktop)
-        # Ele é melhor que CubicSpline para juros pois evita oscilações malucas
         pchip_pre = PchipInterpolator(df_clean['dias'], df_clean['taxa_pre'])
         pchip_ipca = PchipInterpolator(df_clean['dias'], df_clean['taxa_ipca'])
         
@@ -119,7 +124,6 @@ def interpolar_curvas(df_raw, data_ref):
             'data_referencia': data_ref
         })
         
-        # Cálculo da Implícita
         df_final['inflacao_implicita'] = (
             ((1 + df_final['taxa_pre']/100) / (1 + df_final['taxa_ipca']/100)) - 1
         ) * 100
@@ -145,20 +149,20 @@ def salvar_banco(df_final, data_ref):
         )
     ''')
     
+    # Remove se já existir, para garantir que não duplica
     cursor.execute("DELETE FROM curvas_anbima WHERE data_referencia = ?", (data_ref,))
     df_final.to_sql('curvas_anbima', conn, if_exists='append', index=False)
     conn.commit()
     conn.close()
-    print(f"✅ Sucesso! Banco atualizado com dados de {data_ref}.")
+    print(f"✅ Banco atualizado com referência: {data_ref}")
 
 if __name__ == "__main__":
-    txt_content = buscar_dados_txt()
-    
-    if txt_content:
-        df_raw, data_ref = processar_texto(txt_content)
-        if not df_raw.empty:
-            df_final = interpolar_curvas(df_raw, data_ref)
-            salvar_banco(df_final, data_ref)
+    txt = buscar_dados_txt()
+    if txt:
+        df, data = processar_texto(txt)
+        if not df.empty:
+            df_final = interpolar_curvas(df, data)
+            salvar_banco(df_final, data)
         else:
             exit(1)
     else:
