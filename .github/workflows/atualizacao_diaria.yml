@@ -2,7 +2,7 @@ name: Robô ETL Anbima
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5'
+    - cron: '0 10 * * 2-6'
   workflow_dispatch:
 
 jobs:
